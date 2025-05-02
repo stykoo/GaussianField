@@ -1,7 +1,7 @@
 using Test
 include("gaussian_field.jl")
 
-@testset "Fourier test" begin
+@testset "Fourier 1d test" begin
     L, n = 10., 128
     atol, rtol = 1e-7, 1e-5
     atol2, rtol2 = 1e-3, 1e-3 # not precise but OK
@@ -9,11 +9,19 @@ include("gaussian_field.jl")
     A, x0, σ = 2.2, 4.5, 0.75
     X = 0.4
 
+    # Complex / real conversion
+    rdata = randn(Float64, n)
+    fdata = fft(rdata)
+    @test isapprox(fourier_cmplx2real(fourier_real2cmplx(rdata)),
+                   rdata; atol=atol, rtol=rtol)
+    @test isapprox(fourier_real2cmplx(fourier_cmplx2real(fdata)),
+                   fdata; atol=atol, rtol=rtol)
+
+    # Standard Fourier transform
     xx, kk = fourier_xk(L, n)
     yy = exp.(-(xx.-x0) .^2 / 2.) / sqrt(2. * pi)
     fun(k) = exp.(-1im*x0*k - k.^2/ 2.)
 
-    # Standard Fourier transform
     @test isapprox(dx*fft(yy), fun(kk); atol=atol, rtol=rtol)
     @test isapprox(yy, real(ifft(fun(kk)))/dx; atol=atol, rtol=rtol)
 
@@ -43,4 +51,38 @@ include("gaussian_field.jl")
     I2 = dx * sum(yy .* gg)
     I2f = integrate_plancherel_fourier(yyf, ggf, kk)
     @test isapprox(I2, I2f; atol=atol, rtol=rtol)
+end
+
+@testset "Fourier 2d test" begin
+    Lx, nx = 10., 16
+    Ly, ny = 6., 8
+    dx, dy = Lx/nx, Ly/ny
+    σx, σy = 0.75, 0.5
+    x0, y0 = 4.5, 2.8
+    atol, rtol = 1e-7, 1e-5
+    atol2, rtol2 = 1e-5, 1e-2 # rtol is high
+
+    # Complex / real conversion
+    rdata = randn(Float64, (nx, ny))
+    fdata = fft(rdata)
+    @test isapprox(fourier_cmplx2real2(fourier_real2cmplx2(rdata)),
+                   rdata; atol=atol, rtol=rtol)
+    @test isapprox(fourier_real2cmplx2(fourier_cmplx2real2(fdata)),
+                   fdata; atol=atol, rtol=rtol)
+
+    xx, kkx = fourier_xk(Lx, nx)
+    yy, kky = fourier_xk(Ly, ny)
+    fun_r(x, y) = exp.(-((x-x0)^2+(y-y0)^2)/2.) / (2. * pi)
+    fun_k(kx, ky) = exp.(-1im*(x0*kx + y0*ky) - (kx^2+ky^2)/2.)
+    zz = outer_fun(fun_r, (xx, yy))
+    zzf0 = outer_fun(fun_k, (kkx, kky), ComplexF64)
+
+    # Standard Fourier transform
+    @test isapprox(dx*dy*fft(zz), zzf0; atol=atol2, rtol=rtol2)
+    @test isapprox(zz, real(ifft(zzf0))/(dx*dy); atol=atol2, rtol=rtol2)
+
+    # Custom Fourier transform
+    zzf = fourier_fun2(fun_k, kkx, kky)
+    @test isapprox(custom_irfft2(zzf), zz; atol=atol2, rtol=rtol2)
+    @test isapprox(maximum(custom_irfft2(zzf)), maximum(zz); atol=atol2, rtol=rtol2)
 end
