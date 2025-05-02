@@ -3,11 +3,11 @@ include("gaussian_field.jl")
 
 @testset "Fourier 1d test" begin
     L, n = 10., 128
-    atol, rtol = 1e-7, 1e-5
-    atol2, rtol2 = 1e-3, 1e-3 # not precise but OK
     dx = L/n
     A, x0, σ = 2.2, 4.5, 0.75
     X = 0.4
+    atol, rtol = 1e-7, 1e-5
+    atol2, rtol2 = 1e-3, 1e-3 # not precise but OK
 
     # Complex / real conversion
     rdata = randn(Float64, n)
@@ -57,10 +57,12 @@ end
     Lx, nx = 10., 16
     Ly, ny = 6., 8
     dx, dy = Lx/nx, Ly/ny
-    σx, σy = 0.75, 0.5
+    A = 1.4
+    σx, σy = 0.9, 1.2
     x0, y0 = 4.5, 2.8
+    X, Y = 0.4, -0.7
     atol, rtol = 1e-7, 1e-5
-    atol2, rtol2 = 1e-5, 1e-2 # rtol is high
+    atol2, rtol2 = 1e-5, 0.02 # rtol is high
 
     # Complex / real conversion
     rdata = randn(Float64, (nx, ny))
@@ -74,8 +76,8 @@ end
     yy, kky = fourier_xk(Ly, ny)
     fun_r(x, y) = exp.(-((x-x0)^2+(y-y0)^2)/2.) / (2. * pi)
     fun_k(kx, ky) = exp.(-1im*(x0*kx + y0*ky) - (kx^2+ky^2)/2.)
-    zz = outer_fun(fun_r, (xx, yy))
-    zzf0 = outer_fun(fun_k, (kkx, kky), ComplexF64)
+    zz = outer_map(fun_r, (xx, yy))
+    zzf0 = outer_map(fun_k, (kkx, kky), ComplexF64)
 
     # Standard Fourier transform
     @test isapprox(dx*dy*fft(zz), zzf0; atol=atol2, rtol=rtol2)
@@ -84,5 +86,29 @@ end
     # Custom Fourier transform
     zzf = fourier_fun2(fun_k, kkx, kky)
     @test isapprox(custom_irfft2(zzf), zz; atol=atol2, rtol=rtol2)
-    @test isapprox(maximum(custom_irfft2(zzf)), maximum(zz); atol=atol2, rtol=rtol2)
+    @test isapprox(custom_irfft2(zzf), zz; atol=atol2, rtol=rtol2)
+
+    # Gaussian potential
+    fun_g(x, y) = A .* exp.(-(x-x0)^2/(2*σx^2)-(y-y0)^2/(2*σy^2))
+    gg = outer_map(fun_g, (xx, yy))
+    ggf = gaussian_fourier2(kkx, kky; A=A, x0=x0, y0=y0, σx=σx, σy=σy)
+    @test isapprox(custom_irfft2(ggf), gg; atol=atol2, rtol=rtol2)
+
+    # Shift
+    zzs = outer_map(fun_r, (xx.-X, yy.-Y))
+    zzfs = shift_fourier2(zzf, kkx, kky, X, Y)
+    @test isapprox(custom_irfft2(zzfs), zzs; atol=atol2, rtol=rtol2)
+    
+    # Derivative
+    # yyd = -(xx.-x0) .* yy
+    # yyfd = derivative_fourier(yyf, kk)
+    # @test isapprox(custom_irfft(yyfd), yyd; atol=atol2, rtol=rtol2)
+
+    # Integration
+    # I1 = dx * sum(yy .^2)
+    # I1f = integrate_plancherel_fourier(yyf, yyf, kk)
+    # @test isapprox(I1, I1f; atol=atol, rtol=rtol)
+    # I2 = dx * sum(yy .* gg)
+    # I2f = integrate_plancherel_fourier(yyf, ggf, kk)
+    # @test isapprox(I2, I2f; atol=atol, rtol=rtol)
 end

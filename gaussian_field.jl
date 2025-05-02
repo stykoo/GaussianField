@@ -2,6 +2,9 @@ using FFTW
 using DifferentialEquations
 
 
+sym_freq_safe(i::Int, n::Int) = n + 2 - i
+sym_freq(i::Int, n::Int) = ((i==1) || (i==n÷2+1)) ? i : sym_freq_safe(i, n)
+
 function fourier_xk(L::Float64, n::Int; x0::Float64=0.)
     xx = collect(range(x0; step=L/n, length=n))
     kk = 2 * pi * fftfreq(n, n/L)
@@ -15,7 +18,7 @@ function fourier_cmplx2real(ft::Vector{ComplexF64})
     gt[1] = real(ft[1]) # Zero freq
     gt[n÷2+1] = real(ft[n÷2+1]) # Nyquist
     for i = 2:(n÷2)
-        j = n + 2 - i
+        j = sym_freq_safe(i, n)
         gt[i] = sqrt(2) * real(ft[i])
         gt[j] = sqrt(2) * imag(ft[i])
     end
@@ -29,7 +32,7 @@ function fourier_real2cmplx(ft::Vector{Float64})
     gt[1] = ft[1] # Zero freq
     gt[n÷2+1] = ft[n÷2+1] # Nyquist
     for i = 2:(n÷2)
-        j = n + 2 - i
+        j = sym_freq_safe(i, n)
         gt[i] = (ft[i] + 1im * ft[j]) / sqrt(2.)
         gt[j] = (ft[i] - 1im * ft[j]) / sqrt(2.)
     end
@@ -69,13 +72,13 @@ function shift_fourier(ft::Vector{Float64}, kk::Vector{Float64}, X::Float64)
     n = length(ft)
     gt = zeros(Float64, n)
     gt[1] = ft[1] # Zero freq
+    # Nyquist freq set to zero (arbitrary)
     for i = 2:(n÷2)
-        j = n + 2 - i
+        j = sym_freq_safe(i, n)
         s, c = sincos(kk[i] * X)
         gt[i] = c * ft[i] + s * ft[j]
         gt[j] = -s * ft[i] + c * ft[j]
     end
-    # Nyquist freq component remains zero
     return gt
 end
 
@@ -84,7 +87,7 @@ function derivative_fourier(ft::Vector{Float64}, kk::Vector{Float64})
     n = length(ft)
     gt = zeros(Float64, n)
     for i = 2:(n÷2)
-        j = n + 2 - i
+        j = sym_freq_safe(i, n)
         gt[i] = -kk[i] * ft[j]
         gt[j] = kk[i] * ft[i]
     end
@@ -104,7 +107,7 @@ function integrate_plancherel_fourier(ft::Vector{Float64}, gt::Vector{Float64},
 end
 
 
-function outer_fun(fun, xxs, T=Float64)
+function outer_map(fun, xxs, T=Float64)
     res = zeros(T, (length(xx) for xx in xxs)...)
     for i in CartesianIndices(res)
         res[i] = fun((xx[i[k]] for (k, xx) in enumerate(xxs))...)
@@ -116,21 +119,19 @@ end
 function fourier_cmplx2real2(ft::Matrix{ComplexF64})
     s = size(ft) # assume both dimensions are even
     gt = zeros(Float64, s)
-    for j = 1:(s[2]÷2+1), i = 1:(s[1]÷2+1)
-        i2 = ((i == 1) || (i == s[1]÷2+1)) ? i : s[1] + 2 - i
-        j2 = ((j == 1) || (j == s[2]÷2+1)) ? j : s[2] + 2 - j
-        if (i == i2) && (j == j2) # No symmetric frequency
-            gt[i, j] = real(ft[i, j])
-        else
-            gt[i, j] = sqrt(2.) * real(ft[i, j])  # real part
-            gt[i2, j2] = sqrt(2.) * imag(ft[i, j])  # imaginary part
+    # This is unreadable, and the loops should be swapped for better performance
+    for i = 1:s[1]
+        jmin = (i > s[1]÷2+1) ? 2 : 1
+        jmax = s[2]÷2 - jmin + 2
+        for j = jmin:jmax
+            i2, j2 = sym_freq(i, s[1]), sym_freq(j, s[2]) 
+            if (i == i2) && (j == j2) # No symmetric frequency
+                gt[i, j] = real(ft[i, j])
+            else
+                gt[i, j] = sqrt(2.) * real(ft[i, j])  # real part
+                gt[i2, j2] = sqrt(2.) * imag(ft[i, j])  # imaginary part
+            end
         end
-    end
-    for j = 2:(s[2]÷2), i=(s[1]÷2+2):s[1]
-        i2 = s[1] + 2 - i
-        j2 = s[2] + 2 - j
-        gt[i, j] = sqrt(2.) * real(ft[i, j])  # real part
-        gt[i2, j2] = sqrt(2.) * imag(ft[i, j])  # imaginary part
     end
     return gt
 end
@@ -139,21 +140,19 @@ end
 function fourier_real2cmplx2(ft::Matrix{Float64})
     s = size(ft) # assume both dimensions are even
     gt = zeros(ComplexF64, s)
-    for j = 1:(s[2]÷2+1), i = 1:(s[1]÷2+1)
-        i2 = ((i == 1) || (i == s[1]÷2+1)) ? i : s[1] + 2 - i
-        j2 = ((j == 1) || (j == s[2]÷2+1)) ? j : s[2] + 2 - j
-        if (i == i2) && (j == j2) # No symmetric frequency
-            gt[i, j] = ft[i, j]
-        else
-            gt[i, j] = (ft[i, j] + 1im * ft[i2, j2]) / sqrt(2.)
-            gt[i2, j2] = (ft[i, j] - 1im * ft[i2, j2]) / sqrt(2.)
+    # This is unreadable, and the loops should be swapped for better performance
+    for i = 1:s[1]
+        jmin = (i > s[1]÷2+1) ? 2 : 1
+        jmax = s[2]÷2 - jmin + 2
+        for j = jmin:jmax
+            i2, j2 = sym_freq(i, s[1]), sym_freq(j, s[2]) 
+            if (i == i2) && (j == j2) # No symmetric frequency
+                gt[i, j] = ft[i, j]
+            else
+                gt[i, j] = (ft[i, j] + 1im * ft[i2, j2]) / sqrt(2.)
+                gt[i2, j2] = (ft[i, j] - 1im * ft[i2, j2]) / sqrt(2.)
+            end
         end
-    end
-    for j = 2:(s[2]÷2), i=(s[1]÷2+2):s[1]
-        i2 = s[1] + 2 - i
-        j2 = s[2] + 2 - j
-        gt[i, j] = (ft[i, j] + 1im * ft[i2, j2]) / sqrt(2.)
-        gt[i2, j2] = (ft[i, j] - 1im * ft[i2, j2]) / sqrt(2.)
     end
     return gt
 end
@@ -165,13 +164,45 @@ function fourier_fun2(fun, kkx::Vector{Float64}, kky::Vector{Float64})
     dx = 2. * pi / (length(kkx) * (kkx[2]-kkx[1])) # spacing in real space
     dy = 2. * pi / (length(kky) * (kky[2]-kky[1])) # spacing in real space
 
-    ft = outer_fun(fun, (kkx, kky), ComplexF64) / (dx * dy) # Important factor
+    ft = outer_map(fun, (kkx, kky), ComplexF64) / (dx * dy) # Important factor
     return fourier_cmplx2real2(ft)
 end
 
 
 custom_irfft2(ft) = real(ifft(fourier_real2cmplx2(ft)))
 
+
+function gaussian_fourier2(
+        kkx::Vector{Float64}, kky::Vector{Float64};
+        A::Float64=1., x0::Float64=0., y0::Float64=0.,
+        σx::Float64=1., σy::Float64=1.)
+    a = A * 2*pi * σx * σy
+    fun(kx, ky) = a * exp.(-1im*(x0*kx+y0*ky) - (σx*kx)^2/2. - (σy*ky)^2/2.)
+    return fourier_fun2(fun, kkx, kky)
+end
+
+
+function shift_fourier2(ft::Matrix{Float64}, kkx::Vector{Float64},
+        kky::Vector{Float64}, X::Float64, Y::Float64)
+    s = size(ft) # assume both dimensions are even
+    gt = zeros(Float64, s)
+    for i = 1:s[1]
+        jmin = (i > s[1]÷2+1) ? 2 : 1
+        jmax = s[2]÷2 - jmin + 2
+        for j = jmin:jmax
+            i2, j2 = sym_freq(i, s[1]), sym_freq(j, s[2]) 
+            if (i == i2) && (j == j2) # No symmetric frequency
+                # important for zero frequency, arbitrary for Nyquist
+                gt[i, j] = ft[i, j]
+            else
+                si, co = sincos(kkx[i] * X + kky[j] * Y)
+                gt[i, j] = co * ft[i, j] + si * ft[i2, j2]
+                gt[i2, j2] = -si * ft[i, j] + co * ft[i2, j2]
+            end
+        end
+    end
+    return gt
+end
 
 function sde_drift!(du, u, P, t) 
     kk, VV, p = P
