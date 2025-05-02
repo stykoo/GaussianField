@@ -131,7 +131,7 @@ function run(p; solver=ImplicitRKMil(autodiff=AutoFiniteDiff()))
     @assert (p.n % 2 == 0)
     xx, kk = fourier_xk(p.L, p.n)
     # Potential in Fourier space
-    VVk = gaussian_fourier(kk, p.A, p.σ)
+    VVk = gaussian_fourier(kk; A=p.A, σ=p.σ, x0=0.)
     # Initial condition in Fourier space, last indice is tracer position
     u0 = zeros(Float64, length(kk) + 1);
     prob = SDEProblem(sde_drift!, sde_diff!, u0, (0.0, p.tmax), (kk, VVk, p))
