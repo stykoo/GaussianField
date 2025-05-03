@@ -99,10 +99,15 @@ end
     zzfs = shift_fourier2(zzf, kkx, kky, X, Y)
     @test isapprox(custom_irfft2(zzfs), zzs; atol=atol2, rtol=rtol2)
     
-    # Derivative
-    # yyd = -(xx.-x0) .* yy
-    # yyfd = derivative_fourier(yyf, kk)
-    # @test isapprox(custom_irfft(yyfd), yyd; atol=atol2, rtol=rtol2)
+    # Gradient
+    zzd = zeros(nx, ny, 2)
+    for j=1:ny, i=1:nx
+        zzd[i, j, 1] = -(xx[i] - x0) * zz[i, j]
+        zzd[i, j, 2] = -(yy[j] - y0) * zz[i, j]
+    end
+    zzfd = gradient_fourier2(zzf, kkx, kky)
+    @test isapprox(custom_irfft2(zzfd[:, :, 1]), zzd[:, :, 1]; atol=atol2, rtol=rtol2)
+    @test isapprox(custom_irfft2(zzfd[:, :, 2]), zzd[:, :, 2]; atol=atol2, rtol=rtol2)
 
     # Integration
     # I1 = dx * sum(yy .^2)

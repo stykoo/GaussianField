@@ -5,6 +5,7 @@ using DifferentialEquations
 sym_freq_safe(i::Int, n::Int) = n + 2 - i
 sym_freq(i::Int, n::Int) = ((i==1) || (i==n÷2+1)) ? i : sym_freq_safe(i, n)
 
+
 function fourier_xk(L::Float64, n::Int; x0::Float64=0.)
     xx = collect(range(x0; step=L/n, length=n))
     kk = 2 * pi * fftfreq(n, n/L)
@@ -12,6 +13,7 @@ function fourier_xk(L::Float64, n::Int; x0::Float64=0.)
 end
 
 
+### 1D ###
 function fourier_cmplx2real(ft::Vector{ComplexF64})
     n = length(ft)
     gt = zeros(Float64, n)
@@ -107,6 +109,48 @@ function integrate_plancherel_fourier(ft::Vector{Float64}, gt::Vector{Float64},
 end
 
 
+### 2D ###
+struct Iter2D
+    n::Int
+    m::Int
+end
+
+Base.eltype(::Type{Iter2D}) = Tuple{Int, Int, Int, Int}
+
+function Base.iterate(I::Iter2D)
+    return (1, 1, 1, 1), (1, 2, I.m÷2+1)
+end
+
+
+"""
+```
+for i = 1:n
+    jmin = (i > n÷2+1) ? 2 : 1
+    jmax = m÷2 - jmin + 2
+    for j = jmin:jmax
+        nothing
+    end
+end
+```
+"""
+function Base.iterate(I::Iter2D, state::Tuple{Int, Int, Int})
+    i, j, jmax = state
+    if i > I.n
+        return nothing
+    end
+    if j >= jmax
+        in = i + 1
+        jn = (in > I.n÷2+1) ? 2 : 1
+        jmax = I.m÷2 - jn + 2
+    else
+        in, jn = i, j+1
+    end
+
+    i2, j2 = sym_freq(i, I.n), sym_freq(j, I.m) 
+    return ((i, j, i2, j2), (in, jn, jmax))
+end
+
+
 function outer_map(fun, xxs, T=Float64)
     res = zeros(T, (length(xx) for xx in xxs)...)
     for i in CartesianIndices(res)
@@ -120,17 +164,12 @@ function fourier_cmplx2real2(ft::Matrix{ComplexF64})
     s = size(ft) # assume both dimensions are even
     gt = zeros(Float64, s)
     # This is unreadable, and the loops should be swapped for better performance
-    for i = 1:s[1]
-        jmin = (i > s[1]÷2+1) ? 2 : 1
-        jmax = s[2]÷2 - jmin + 2
-        for j = jmin:jmax
-            i2, j2 = sym_freq(i, s[1]), sym_freq(j, s[2]) 
-            if (i == i2) && (j == j2) # No symmetric frequency
-                gt[i, j] = real(ft[i, j])
-            else
-                gt[i, j] = sqrt(2.) * real(ft[i, j])  # real part
-                gt[i2, j2] = sqrt(2.) * imag(ft[i, j])  # imaginary part
-            end
+    for (i, j, i2, j2) in Iter2D(s[1], s[2])
+        if (i == i2) && (j == j2) # No symmetric frequency
+            gt[i, j] = real(ft[i, j])
+        else
+            gt[i, j] = sqrt(2.) * real(ft[i, j])  # real part
+            gt[i2, j2] = sqrt(2.) * imag(ft[i, j])  # imaginary part
         end
     end
     return gt
@@ -141,17 +180,12 @@ function fourier_real2cmplx2(ft::Matrix{Float64})
     s = size(ft) # assume both dimensions are even
     gt = zeros(ComplexF64, s)
     # This is unreadable, and the loops should be swapped for better performance
-    for i = 1:s[1]
-        jmin = (i > s[1]÷2+1) ? 2 : 1
-        jmax = s[2]÷2 - jmin + 2
-        for j = jmin:jmax
-            i2, j2 = sym_freq(i, s[1]), sym_freq(j, s[2]) 
-            if (i == i2) && (j == j2) # No symmetric frequency
-                gt[i, j] = ft[i, j]
-            else
-                gt[i, j] = (ft[i, j] + 1im * ft[i2, j2]) / sqrt(2.)
-                gt[i2, j2] = (ft[i, j] - 1im * ft[i2, j2]) / sqrt(2.)
-            end
+    for (i, j, i2, j2) in Iter2D(s[1], s[2])
+        if (i == i2) && (j == j2) # No symmetric frequency
+            gt[i, j] = ft[i, j]
+        else
+            gt[i, j] = (ft[i, j] + 1im * ft[i2, j2]) / sqrt(2.)
+            gt[i2, j2] = (ft[i, j] - 1im * ft[i2, j2]) / sqrt(2.)
         end
     end
     return gt
@@ -163,7 +197,6 @@ function fourier_fun2(fun, kkx::Vector{Float64}, kky::Vector{Float64})
     s = length(kkx), length(kky) # Assume both dimensions are even
     dx = 2. * pi / (length(kkx) * (kkx[2]-kkx[1])) # spacing in real space
     dy = 2. * pi / (length(kky) * (kky[2]-kky[1])) # spacing in real space
-
     ft = outer_map(fun, (kkx, kky), ComplexF64) / (dx * dy) # Important factor
     return fourier_cmplx2real2(ft)
 end
@@ -186,24 +219,37 @@ function shift_fourier2(ft::Matrix{Float64}, kkx::Vector{Float64},
         kky::Vector{Float64}, X::Float64, Y::Float64)
     s = size(ft) # assume both dimensions are even
     gt = zeros(Float64, s)
-    for i = 1:s[1]
-        jmin = (i > s[1]÷2+1) ? 2 : 1
-        jmax = s[2]÷2 - jmin + 2
-        for j = jmin:jmax
-            i2, j2 = sym_freq(i, s[1]), sym_freq(j, s[2]) 
-            if (i == i2) && (j == j2) # No symmetric frequency
-                # important for zero frequency, arbitrary for Nyquist
-                gt[i, j] = ft[i, j]
-            else
-                si, co = sincos(kkx[i] * X + kky[j] * Y)
-                gt[i, j] = co * ft[i, j] + si * ft[i2, j2]
-                gt[i2, j2] = -si * ft[i, j] + co * ft[i2, j2]
-            end
+    for (i, j, i2, j2) in Iter2D(s[1], s[2])
+        if (i == i2) && (j == j2) # No symmetric frequency
+            # important for zero frequency, arbitrary for Nyquist
+            gt[i, j] = ft[i, j]
+        else
+            si, co = sincos(kkx[i] * X + kky[j] * Y)
+            gt[i, j] = co * ft[i, j] + si * ft[i2, j2]
+            gt[i2, j2] = -si * ft[i, j] + co * ft[i2, j2]
         end
     end
     return gt
 end
 
+
+function gradient_fourier2(ft::Matrix{Float64}, kkx::Vector{Float64},
+        kky::Vector{Float64})
+    s = size(ft)
+    gt = zeros(Float64, (s[1], s[2], 2))
+    for (i, j, i2, j2) in Iter2D(s[1], s[2])
+        if !((i == i2) && (j == j2)) # Symmetric frequency
+            gt[i, j, 1] = -kkx[i] * ft[i2, j2]
+            gt[i, j, 2] = -kky[j] * ft[i2, j2]
+            gt[i2, j2, 1] = kkx[i] * ft[i, j]
+            gt[i2, j2, 2] = kky[j] * ft[i, j]
+        end
+    end
+    return gt
+end
+
+
+### Numerical integration ###
 function sde_drift!(du, u, P, t) 
     kk, VV, p = P
     n = length(kk)
