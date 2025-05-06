@@ -249,6 +249,17 @@ function gradient_fourier2(ft::Matrix{Float64}, kkx::Vector{Float64},
 end
 
 
+function integrate_plancherel_fourier2(ft::Matrix{Float64}, gt::Matrix{Float64},
+        kkx::Vector{Float64}, kky::Vector{Float64})
+    dkx = kkx[2] - kkx[1]
+    dky = kky[2] - kky[1]
+    fac = (2. * pi) / (length(kkx)^2 * dkx)
+    fac *= (2. * pi) / (length(kky)^2 * dky)
+    s = sum(ft .* gt) # Check that this gives the real part of the integral
+    return fac * s
+end
+
+
 ### Numerical integration ###
 function sde_drift!(du, u, P, t) 
     kk, VV, p = P
@@ -301,3 +312,60 @@ function run(p; solver=ImplicitRKMil(autodiff=AutoFiniteDiff()))
     return sol
 end
 
+
+function sde_drift2!(du, u, P, t) 
+    kkx, kky, VV, p = P
+    # XX = reshape(u[p.nx*p.ny+1:end], (2, p.m))
+    # Shifted potentials
+    # VVs = [shift_fourier2(VV, kkx, kky, XX[1, i], XX[2, i]) for i in 1:p.m]
+
+    # Field dynamics
+    lin = LinearIndices((1:p.nx, 1:p.ny))
+    for j = 1:p.ny, i = 1:p.nx
+        k2 = kkx[i]^2 + kky[j]
+        w = (p.r + k2) * u[lin[i, j]]
+        # for l = 1:p.m
+        #     w -= VVs[l][i, j]
+        # end
+        du[lin[i, j]] = -p.D * k2 * w
+    end
+
+    # Particle dynamics
+    # for j = 1:m
+    #     f = -integrate_plancherel_fourier(
+    #         u[1:n], derivative_fourier(VVs[j], kk), kk
+    #     ) 
+    #     # take initial position as center of trap 
+    #     du[n+j] = -p.k * (XX[j] - p.X0[j]) + f
+    # end
+end
+
+
+function sde_diff2!(du, u, P, t)
+    kkx, kky, VV, p = P
+    # Field
+    lin = LinearIndices((1:p.nx, 1:p.ny))
+    for j = 1:p.ny, i = 1:p.nx
+        du[lin[i, j]] = 2. * p.T * p.D * sqrt(kkx[i]^2 + kky[j]^2)
+    end
+    # Particles
+    du[p.nx*p.ny+1:end] .= 2 * p.T
+end
+
+
+function run2(p; solver=ImplicitRKMil(autodiff=AutoFiniteDiff()))
+    # No support for odd number of divisions
+    @assert (p.nx % 2 == 0)
+    @assert (p.ny % 2 == 0)
+    xx, kkx = fourier_xk(p.Lx, p.nx)
+    yy, kky = fourier_xk(p.Ly, p.ny)
+    # Potential in Fourier space
+    VVk = gaussian_fourier2(kkx, kky; A=p.A, σx=p.σ, σy=p.σ, x0=0., y0=0.)
+    # Initial condition in Fourier space, last indice is tracer position
+    u0 = zeros(Float64, p.nx*p.ny+2*p.m)
+    u0[p.nx*p.ny+1:end] = reshape(p.X0, 2*p.m)
+    prob = SDEProblem(sde_drift2!, sde_diff2!, u0, (0.0, p.tmax),
+                      (kkx, kky, VVk, p))
+    sol = solve(prob, solver; saveat=p.saveat)
+    return sol
+end

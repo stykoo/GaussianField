@@ -110,10 +110,10 @@ end
     @test isapprox(custom_irfft2(zzfd[:, :, 2]), zzd[:, :, 2]; atol=atol2, rtol=rtol2)
 
     # Integration
-    # I1 = dx * sum(yy .^2)
-    # I1f = integrate_plancherel_fourier(yyf, yyf, kk)
-    # @test isapprox(I1, I1f; atol=atol, rtol=rtol)
-    # I2 = dx * sum(yy .* gg)
-    # I2f = integrate_plancherel_fourier(yyf, ggf, kk)
-    # @test isapprox(I2, I2f; atol=atol, rtol=rtol)
+    I1 = dx * dy * sum(zz .^2)
+    I1f = integrate_plancherel_fourier2(zzf, zzf, kkx, kky)
+    @test isapprox(I1, I1f; atol=atol2, rtol=rtol2)
+    I2 = dx * dy * sum(zz .* gg)
+    I2f = integrate_plancherel_fourier2(zzf, ggf, kkx, kky)
+    @test isapprox(I2, I2f; atol=atol2, rtol=rtol2)
 end
