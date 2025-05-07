@@ -315,18 +315,18 @@ end
 
 function sde_drift2!(du, u, P, t) 
     kkx, kky, VV, p = P
-    # XX = reshape(u[p.nx*p.ny+1:end], (2, p.m))
+    XX = reshape(u[p.nx*p.ny+1:end], (2, p.m))
     # Shifted potentials
-    # VVs = [shift_fourier2(VV, kkx, kky, XX[1, i], XX[2, i]) for i in 1:p.m]
+    VVs = [shift_fourier2(VV, kkx, kky, XX[1, i], XX[2, i]) for i in 1:p.m]
 
     # Field dynamics
     lin = LinearIndices((1:p.nx, 1:p.ny))
     for j = 1:p.ny, i = 1:p.nx
-        k2 = kkx[i]^2 + kky[j]
+        k2 = kkx[i]^2 + kky[j]^2
         w = (p.r + k2) * u[lin[i, j]]
-        # for l = 1:p.m
-        #     w -= VVs[l][i, j]
-        # end
+        for l = 1:p.m
+            w -= VVs[l][i, j]
+        end
         du[lin[i, j]] = -p.D * k2 * w
     end
 
