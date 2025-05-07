@@ -315,15 +315,21 @@ end
 
 function sde_drift2!(du, u, P, t) 
     kkx, kky, VV, p = P
-    XX = reshape(u[p.nx*p.ny+1:end], (2, p.m))
+    ntot = p.nx * p.ny
+    v = reshape(u[1:ntot], (p.nx, p.ny))
+    XX = reshape(u[ntot+1:end], (2, p.m))
+
     # Shifted potentials
-    VVs = [shift_fourier2(VV, kkx, kky, XX[1, i], XX[2, i]) for i in 1:p.m]
+    VVs = [
+        shift_fourier2(VV, kkx, kky, XX[1, l], XX[2, l])
+        for l in 1:p.m
+    ]
 
     # Field dynamics
     lin = LinearIndices((1:p.nx, 1:p.ny))
-    for j = 1:p.ny, i = 1:p.nx
+    for j=1:p.ny, i=1:p.nx
         k2 = kkx[i]^2 + kky[j]^2
-        w = (p.r + k2) * u[lin[i, j]]
+        w = (p.r + k2) * v[i, j]
         for l = 1:p.m
             w -= VVs[l][i, j]
         end
@@ -331,13 +337,15 @@ function sde_drift2!(du, u, P, t)
     end
 
     # Particle dynamics
-    # for j = 1:m
-    #     f = -integrate_plancherel_fourier(
-    #         u[1:n], derivative_fourier(VVs[j], kk), kk
-    #     ) 
-    #     # take initial position as center of trap 
-    #     du[n+j] = -p.k * (XX[j] - p.X0[j]) + f
-    # end
+    linX = LinearIndices((1:2, 1:p.m))
+    for l=1:p.m
+        VVsg = gradient_fourier2(VVs[l], kkx, kky)
+        for a = 1:2
+            f = -integrate_plancherel_fourier2(v, VVsg[:,:,a], kkx, kky) 
+            # take initial position as center of trap 
+            du[ntot+linX[a, l]] = -p.k * (XX[a, l] - p.X0[a, l]) + f
+        end
+    end
 end
 
 
@@ -345,7 +353,7 @@ function sde_diff2!(du, u, P, t)
     kkx, kky, VV, p = P
     # Field
     lin = LinearIndices((1:p.nx, 1:p.ny))
-    for j = 1:p.ny, i = 1:p.nx
+    for j=1:p.ny, i=1:p.nx
         du[lin[i, j]] = 2. * p.T * p.D * sqrt(kkx[i]^2 + kky[j]^2)
     end
     # Particles
@@ -357,6 +365,7 @@ function run2(p; solver=ImplicitRKMil(autodiff=AutoFiniteDiff()))
     # No support for odd number of divisions
     @assert (p.nx % 2 == 0)
     @assert (p.ny % 2 == 0)
+    @assert (size(p.X0) == (2, p.m))
     xx, kkx = fourier_xk(p.Lx, p.nx)
     yy, kky = fourier_xk(p.Ly, p.ny)
     # Potential in Fourier space
@@ -367,5 +376,40 @@ function run2(p; solver=ImplicitRKMil(autodiff=AutoFiniteDiff()))
     prob = SDEProblem(sde_drift2!, sde_diff2!, u0, (0.0, p.tmax),
                       (kkx, kky, VVk, p))
     sol = solve(prob, solver; saveat=p.saveat)
+    return sol
+end
+
+
+function save2(fname::String, sol, p)
+    x, kx = fourier_xk(p.Lx, p.nx)
+    y, ky = fourier_xk(p.Ly, p.ny)
+
+    Xtmp = [reshape(s[p.nx*p.ny+1:end], (2, p.m)) for s in sol.u]
+    X = cat(Xtmp..., dims=3)
+
+    utmp = [reshape(s[1:p.nx*p.ny], (p.nx, p.ny)) for s in sol.u]
+    uf = cat([fftshift(s) for s in utmp]..., dims=3)
+    u = cat([custom_irfft2(s) for s in utmp]..., dims=3)
+
+    h5open(fname, "w") do fid
+        for (k,v) in zip(keys(p), p)
+            attributes(fid)[String(k)] = v
+        end
+        fid["t"] = sol.t
+        fid["x"] = x
+        fid["y"] = y
+        fid["kx"] = fftshift(kx)
+        fid["ky"] = fftshift(ky)
+        fid["X"] = X
+        fid["uf"] = uf
+        fid["u"] = u
+    end
+end
+
+
+function run_and_save2(p, fname::String;
+                       solver=ImplicitRKMil(autodiff=AutoFiniteDiff()))
+    sol = run2(p; solver=solver)
+    save2(fname, sol, p)
     return sol
 end
